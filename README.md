@@ -45,20 +45,6 @@ A full-stack AI interview platform that conducts voice-enabled technical intervi
     npm install
     npm run dev 
 ```
----
 
-### 🎤 How to Talk About This in an Interview
-
-When a recruiter asks, *"Tell me about a challenging project you built,"* here is your script:
-
-> "I built an AI Interview Agent because I wanted to understand how to integrate LLMs into a real-world web app.
->
-> The biggest technical challenge was **State Management and Context**.
->
-> Initially, the AI would forget the candidate's resume halfway through the chat. I solved this by implementing a **Context Injection** strategy where the parsed resume text is fed into the 'System Instruction' of the model.
->
-> I also had to deal with **Non-Deterministic Outputs**. The AI would sometimes return broken JSON when grading the candidate. I wrote a custom middleware to sanitize the string output before parsing it, which prevented the app from crashing.
->
-> Finally, I added **Voice Support** using the Web Speech API to make it accessible and interactive without incurring extra API costs."
 
 ---
