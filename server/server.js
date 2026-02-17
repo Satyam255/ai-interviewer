@@ -5,6 +5,8 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const pdf = require("pdf-parse");
 const fs = require("fs");
+const http = require("http");
+const { Server } = require("socket.io");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Resume = require("./models/Resume");
 const Interview = require("./models/Interview");
@@ -22,40 +24,34 @@ mongoose
 // 2. Configure Multer (Temporary storage for uploads)
 const upload = multer({ dest: "uploads/" });
 
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "http://localhost:5173" },
+});
+
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- ROUTES ---
+// --- HELPERS ---
 
-// Route 1: Upload & Parse Resume
-app.post("/upload", upload.single("resume"), async (req, res) => {
+// Robust JSON parser that handles fenced code blocks and markdown from AI
+function cleanAndParseJSON(rawText) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded" });
+    // Strip markdown code fences if present
+    let cleaned = rawText.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned
+        .replace(/^```(?:json)?\s*\n?/, "")
+        .replace(/\n?```\s*$/, "");
     }
-
-    const dataBuffer = fs.readFileSync(req.file.path);
-    const pdfData = await pdf(dataBuffer);
-    const extractedText = pdfData.text;
-
-    // --- FIX: Use 'textContent' to match your Schema ---
-    const newResume = new Resume({
-      filename: req.file.originalname,
-      textContent: extractedText, // <--- CHANGED from 'text' to 'textContent'
-    });
-
-    console.log("Saving Resume:", newResume); // Log it to check before saving
-    await newResume.save();
-
-    fs.unlinkSync(req.file.path);
-
-    res.json({ message: "Resume processed", resumeId: newResume._id });
-  } catch (error) {
-    console.error("Upload Error:", error);
-    res.status(500).json({ error: "Failed to process resume" });
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.error("JSON parse failed:", err.message);
+    return null;
   }
-});
-// --- HELPER: The Grading Agent ---
+}
+
+// Grading Agent — evaluates the interview transcript
 async function generateFeedback(interviewHistory) {
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -77,10 +73,8 @@ async function generateFeedback(interviewHistory) {
   const response = await result.response;
   const text = response.text();
 
-  // Use our new robust parser
   const feedbackData = cleanAndParseJSON(text);
 
-  // Fallback if AI fails completely
   if (!feedbackData) {
     return {
       technicalScore: 0,
@@ -94,125 +88,181 @@ async function generateFeedback(interviewHistory) {
   return feedbackData;
 }
 
-// Route: Start New Interview
-app.post("/start", async (req, res) => {
-  const { resumeId, limit } = req.body; // Receive limit
-  const newInterview = new Interview({
-    resumeId,
-    messages: [],
-    questionLimit: limit || 5, // Default to 5 if missing
-  });
-  await newInterview.save();
-  res.json({ interviewId: newInterview._id });
+// --- ROUTES ---
+
+// Route: Upload & Parse Resume (kept as HTTP — file uploads don't benefit from WS)
+app.post("/upload", upload.single("resume"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const dataBuffer = fs.readFileSync(req.file.path);
+    const pdfData = await pdf(dataBuffer);
+    const extractedText = pdfData.text;
+
+    const newResume = new Resume({
+      filename: req.file.originalname,
+      textContent: extractedText,
+    });
+
+    console.log("Saving Resume:", newResume);
+    await newResume.save();
+
+    fs.unlinkSync(req.file.path);
+
+    res.json({ message: "Resume processed", resumeId: newResume._id });
+  } catch (error) {
+    console.error("Upload Error:", error);
+    res.status(500).json({ error: "Failed to process resume" });
+  }
 });
 
-// Route: Chat (Modified for Phase 3)
-app.post("/chat", async (req, res) => {
-  try {
-    const { message, interviewId } = req.body;
+// --- WEBSOCKET SESSION ---
+io.on("connection", (socket) => {
+  console.log("User connected:", socket.id);
 
-    // 1. Fetch Interview Session
-    const interview =
-      await Interview.findById(interviewId).populate("resumeId");
-    if (!interview)
-      return res.status(404).json({ error: "Interview not found" });
-
-    // 2. Add User Message to DB
-    interview.messages.push({ role: "user", content: message });
-
-    // 3. CHECK END CONDITION (e.g., 5 exchanges)
-    // We count how many times the user has replied.
-    // Check dynamic limit
-    const userReplies = interview.messages.filter(
-      (m) => m.role === "user",
-    ).length;
-
-    if (userReplies >= interview.questionLimit) {
-      // --- END INTERVIEW MODE ---
-      const feedback = await generateFeedback(interview.messages);
-
-      interview.status = "completed";
-      interview.feedback = feedback;
-      interview.messages.push({
-        role: "model",
-        content: "Interview complete. Generating feedback...",
+  // Event: Start a new interview session
+  socket.on("joinInterview", async ({ resumeId, limit }) => {
+    try {
+      const newInterview = new Interview({
+        resumeId,
+        messages: [],
+        questionLimit: limit || 5,
       });
+      await newInterview.save();
+
+      // Join a room so we can target this interview
+      socket.join(newInterview._id.toString());
+      socket.interviewId = newInterview._id.toString();
+
+      socket.emit("interviewStarted", { interviewId: newInterview._id });
+      console.log("Interview started:", newInterview._id);
+    } catch (error) {
+      console.error("joinInterview Error:", error);
+      socket.emit("error", "Failed to start interview");
+    }
+  });
+
+  // Event: User sends a chat message
+  socket.on("chatMessage", async ({ message, interviewId }) => {
+    try {
+      // A. Retrieve interview + resume context
+      const interview =
+        await Interview.findById(interviewId).populate("resumeId");
+
+      if (!interview) {
+        socket.emit("error", "Interview not found");
+        return;
+      }
+
+      const resumeText =
+        interview.resumeId?.textContent || "No resume provided.";
+      const questionLimit = interview.questionLimit || 5;
+
+      // Count how many questions the AI has asked so far
+      const aiMessageCount = interview.messages.filter(
+        (m) => m.role === "model",
+      ).length;
+
+      const isLastQuestion = aiMessageCount >= questionLimit - 1;
+
+      // B. Build the system prompt
+      let systemPrompt = `You are an expert technical interviewer. You are conducting a live interview.
+The candidate's resume:
+---
+${resumeText}
+---
+Rules:
+- Ask ONE question at a time, then wait for the candidate's answer.
+- Base questions on the candidate's resume skills and experience.
+- Start with easier questions and progressively increase difficulty.
+- Keep responses concise (2-3 sentences max per turn).
+- You have a limit of ${questionLimit} questions total.`;
+
+      if (isLastQuestion) {
+        systemPrompt += `\n- This is your LAST question. After the candidate answers, thank them and say the interview is complete. Do NOT ask another question.`;
+      }
+
+      // C. Build Gemini-format conversation history
+      const contents = [];
+
+      // System instruction as the first user turn
+      contents.push({
+        role: "user",
+        parts: [{ text: systemPrompt }],
+      });
+      contents.push({
+        role: "model",
+        parts: [
+          {
+            text: "Understood. I'll conduct the interview following these guidelines. Let's begin.",
+          },
+        ],
+      });
+
+      // Append stored conversation history
+      for (const msg of interview.messages) {
+        contents.push({
+          role: msg.role,
+          parts: [{ text: msg.content }],
+        });
+      }
+
+      // Append the new user message
+      contents.push({
+        role: "user",
+        parts: [{ text: message }],
+      });
+
+      // D. Stream response from Gemini
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const result = await model.generateContentStream({ contents });
+
+      let fullResponse = "";
+
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
+        fullResponse += chunkText;
+        socket.emit("aiResponseChunk", chunkText);
+      }
+
+      // E. Save messages to DB
+      interview.messages.push({ role: "user", content: message });
+      interview.messages.push({ role: "model", content: fullResponse });
       await interview.save();
 
-      return res.json({
-        reply: "Thank you for your time. The interview is now closed.",
-        isComplete: true,
-        feedback: feedback,
-      });
+      socket.emit("aiResponseComplete");
+
+      // F. If question limit reached, generate feedback and end interview
+      const updatedAiCount = interview.messages.filter(
+        (m) => m.role === "model",
+      ).length;
+
+      if (updatedAiCount >= questionLimit) {
+        console.log("Question limit reached, generating feedback...");
+
+        const feedback = await generateFeedback(interview.messages);
+
+        interview.status = "completed";
+        interview.feedback = feedback;
+        await interview.save();
+
+        socket.emit("interviewComplete", feedback);
+        console.log("Interview completed:", interviewId);
+      }
+    } catch (error) {
+      console.error("chatMessage Error:", error);
+      socket.emit("error", "Something went wrong during the interview");
     }
+  });
 
-    // 4. CONTINUE INTERVIEW MODE
-    // Build Context
-    let contextInstruction = "";
-    if (interview.resumeId) {
-      contextInstruction = `Candidate Resume Context: "${interview.resumeId.textContent}"`;
-    }
-
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: `
-            You are a strict but fair technical interviewer. 
-            ${contextInstruction}
-            
-            GUIDELINES:
-            1. Ask ONE question at a time.
-            2. Do NOT be repetitive. If the candidate answered well, move to a new topic.
-            3. If the candidate gives a very short or vague answer, ask a follow-up question like "Can you explain that in more detail?"
-            4. Do NOT provide feedback (like "That is correct") yet. Just move to the next question.
-            5. Keep your tone professional and neutral.
-            `,
-    });
-
-    // Convert DB messages to Gemini API format
-    const historyForGemini = interview.messages.map((m) => ({
-      role: m.role, // 'user' or 'model'
-      parts: [{ text: m.content }],
-    }));
-
-    const chat = model.startChat({ history: historyForGemini });
-    const result = await chat.sendMessage(message);
-    const aiResponse = result.response.text();
-
-    // 5. Save AI Response to DB
-    interview.messages.push({ role: "model", content: aiResponse });
-    await interview.save();
-
-    res.json({
-      reply: aiResponse,
-      isComplete: false,
-    });
-  } catch (error) {
-    console.error("Chat Error:", error);
-    res.status(500).json({ error: "Server Error" });
-  }
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+  });
 });
 
-// Helper: Clean and Parse JSON from AI
-function cleanAndParseJSON(text) {
-  // 1. Remove markdown code blocks (e.g., ```json ... ```)
-  let cleanText = text.replace(/```json/g, "").replace(/```/g, "");
-
-  // 2. Find the first '{' and the last '}'
-  const firstBrace = cleanText.indexOf("{");
-  const lastBrace = cleanText.lastIndexOf("}");
-
-  if (firstBrace !== -1 && lastBrace !== -1) {
-    cleanText = cleanText.substring(firstBrace, lastBrace + 1);
-  }
-
-  // 3. Parse
-  try {
-    return JSON.parse(cleanText);
-  } catch (e) {
-    console.error("JSON Parse Error. Raw text:", text);
-    return null; // Return null so we can handle the error gracefully
-  }
-}
-
+// Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

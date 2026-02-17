@@ -2,12 +2,12 @@ const mongoose = require("mongoose");
 
 const interviewSchema = new mongoose.Schema({
   resumeId: { type: mongoose.Schema.Types.ObjectId, ref: "Resume" },
+  questionLimit: { type: Number, default: 5 },
   messages: [
     {
       role: String, // 'user' or 'model'
       content: String,
       timestamp: { type: Date, default: Date.now },
-      questionLimit: { type: Number, default: 5 },
     },
   ],
   status: { type: String, default: "ongoing" }, // 'ongoing' or 'completed'
