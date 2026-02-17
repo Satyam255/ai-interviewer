@@ -34,7 +34,6 @@ A full-stack, real-time AI interview platform that conducts voice-enabled techni
 
 ## 📸 Screenshots
 
-*(Add screenshots of your Video UI and Score Card here)*
 
 ## 🏃‍♂️ How to Run
 
