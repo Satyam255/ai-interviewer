@@ -1,38 +1,46 @@
-# 🤖 AI Mock Interviewer (MERN + Gemini)
+# 🤖 AI Mock Interviewer (MERN + Gemini + WebSockets)
 
-A full-stack AI interview platform that conducts voice-enabled technical interviews, analyzes resumes, and provides detailed feedback scores.
+A full-stack, real-time AI interview platform that conducts voice-enabled technical interviews, analyzes resumes, and provides detailed feedback scores. Now powered by **WebSockets** for streaming responses and a **Live Video Interface** for a realistic interview experience.
 
 ## 🚀 Features
 
-- **📄 Resume Analysis:** Upload a PDF resume; the AI extracts skills and tailors questions to your experience.
-- **🗣️ Voice Interaction:** Speak your answers naturally using the Web Speech API (no keyboard needed).
-- **🧠 Context-Aware Questions:** The AI remembers your previous answers and asks relevant follow-up questions.
-- **📊 Smart Grading System:** Generates a JSON-based report card with scores (0-10) for Technical Skills and Communication.
-- **⚡ Real-time Latency:** Optimized for fast response times using Google Gemini 1.5 Flash.
+- **⚡ Real-Time Streaming:** Uses **Socket.io** to stream AI responses letter-by-letter, eliminating wait times.
+- **📹 Live Video Interface:** A realistic video-call UI that renders the user's camera feed alongside the AI agent.
+- **📄 Resume Parsing (RAG):** Upload a PDF resume; the AI extracts skills and tailors questions to your specific experience.
+- **🗣️ Voice Interaction:** Speak your answers naturally using the **Web Speech API** (Speech-to-Text) and listen to the AI (Text-to-Speech).
+- **🧠 Context-Aware Memory:** The AI remembers your previous answers and asks relevant follow-up questions.
+- **📊 Smart Grading System:** Generates a JSON-based report card with scores (0-10) for Technical Skills, Communication, and actionable feedback.
 
 ## 🛠️ Tech Stack
 
-- **Frontend:** React (Vite), Axios, Tailwind CSS (optional)
-- **Backend:** Node.js, Express.js
+- **Frontend:** React (Vite), Socket.io-Client, Web Speech API
+- **Backend:** Node.js, Express.js, Socket.io (WebSockets)
 - **Database:** MongoDB (Mongoose)
-- **AI Engine:** Google Gemini API (Generative AI)
-- **Tools:** Multer (File Uploads), PDF-Parse, Web Speech API
+- **AI Engine:** Google Gemini 1.5 Flash (Stream API)
+- **Tools:** Multer (File Uploads), PDF-Parse
 
 ## 🧩 System Architecture
 
-1. **User Uploads Resume** → Parsed by Backend → Text Stored in MongoDB.
-2. **Interview Starts** → System injects Resume Text into System Prompt.
-3. **User Speaks/Types** → Text sent to Gemini API with Chat History.
-4. **AI Responds** → Frontend uses Text-to-Speech to read the question.
-5. **Session Ends** → Transcript sent to "Grader AI" for evaluation.
 
+
+1. **Initialization:** User uploads Resume (HTTP) → Text extracted & stored in MongoDB.
+2. **Connection:** Client establishes a **WebSocket** connection with the Backend.
+3. **The Interview Loop:**
+   - **User Speaks:** Audio converted to text via Browser API.
+   - **Socket Emit:** Text sent to Node.js server.
+   - **AI Stream:** Server pipes text to Gemini Stream API.
+   - **Real-Time Render:** AI response chunks are pushed to the Frontend instantly.
+4. **Completion:** Session ends → Full transcript sent to "Grader AI" → JSON Report generated.
+
+## 📸 Screenshots
+
+*(Add screenshots of your Video UI and Score Card here)*
 
 ## 🏃‍♂️ How to Run
 
 1. **Clone the Repo**
    ```bash
-   git clone [https://github.com/Satyam255/ai-interviewer.git]
-
+   git clone [https://github.com/Satyam255/ai-interviewer.git](https://github.com/Satyam255/ai-interviewer.git)
 2. **Setup Backend**
    ```bash
    cd server
