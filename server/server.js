@@ -123,10 +123,11 @@ io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
   // Event: Start a new interview session
-  socket.on("joinInterview", async ({ resumeId, limit }) => {
+  socket.on("joinInterview", async ({ resumeId, limit, jobDescription }) => {
     try {
       const newInterview = new Interview({
         resumeId,
+        jobDescription: jobDescription || "",
         messages: [],
         questionLimit: limit || 5,
       });
@@ -158,6 +159,7 @@ io.on("connection", (socket) => {
 
       const resumeText =
         interview.resumeId?.textContent || "No resume provided.";
+      const jdText = interview.jobDescription || "";
       const questionLimit = interview.questionLimit || 5;
 
       // Count how many questions the AI has asked so far
@@ -173,9 +175,10 @@ The candidate's resume:
 ---
 ${resumeText}
 ---
+${jdText ? `The job description for the role:\n---\n${jdText}\n---` : ""}
 Rules:
 - Ask ONE question at a time, then wait for the candidate's answer.
-- Base questions on the candidate's resume skills and experience.
+- Base questions on the candidate's resume skills and experience.${jdText ? "\n- Also tailor questions to match the job description requirements." : ""}
 - Start with easier questions and progressively increase difficulty.
 - Keep responses concise (2-3 sentences max per turn).
 - You have a limit of ${questionLimit} questions total.`;

@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const interviewSchema = new mongoose.Schema({
   resumeId: { type: mongoose.Schema.Types.ObjectId, ref: "Resume" },
+  jobDescription: { type: String, default: "" },
   questionLimit: { type: Number, default: 5 },
   messages: [
     {
