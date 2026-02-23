@@ -11,6 +11,35 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Resume = require("./models/Resume");
 const Interview = require("./models/Interview");
 
+// ── PYTHON ATS SERVICE CONFIG ──
+const ATS_SERVICE_URL = "http://localhost:8000/calculate_weighted_score";
+
+// ── DUMMY JD FOR ATS TESTING ──
+const DUMMY_JD = `
+Job Title: Full Stack Software Engineer
+
+We are looking for a skilled Full Stack Software Engineer to join our team.
+
+Requirements:
+- 2+ years of experience in software development
+- Proficiency in JavaScript, TypeScript, Python, or Java
+- Experience with React, Angular, or Vue.js for frontend development
+- Backend experience with Node.js, Express, Django, or Spring Boot
+- Database experience with MongoDB, PostgreSQL, or MySQL
+- Familiarity with RESTful APIs and microservices architecture
+- Experience with Git, CI/CD pipelines, and cloud platforms (AWS/GCP/Azure)
+- Strong problem-solving and communication skills
+- Experience with Docker, Kubernetes, or containerization is a plus
+- Knowledge of system design and distributed systems is preferred
+
+Responsibilities:
+- Design, develop, and maintain web applications
+- Collaborate with cross-functional teams to deliver features
+- Write clean, testable, and well-documented code
+- Participate in code reviews and mentor junior developers
+- Optimize application performance and scalability
+`;
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -90,30 +119,100 @@ async function generateFeedback(interviewHistory) {
 
 // --- ROUTES ---
 
-// Route: Upload & Parse Resume (kept as HTTP — file uploads don't benefit from WS)
+// Route: Upload & Parse Resume + ATS Check
 app.post("/upload", upload.single("resume"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
+    console.log("\n" + "=".repeat(60));
+    console.log("📥 RESUME UPLOAD STARTED");
+    console.log("=".repeat(60));
+    console.log("📄 File:", req.file.originalname);
+
     const dataBuffer = fs.readFileSync(req.file.path);
     const pdfData = await pdf(dataBuffer);
     const extractedText = pdfData.text;
+    console.log("✅ PDF parsed. Extracted", extractedText.length, "characters");
+    console.log("📝 Resume Preview:", extractedText.substring(0, 200) + "...");
 
     const newResume = new Resume({
       filename: req.file.originalname,
       textContent: extractedText,
     });
 
-    console.log("Saving Resume:", newResume);
     await newResume.save();
+    console.log("✅ Resume saved to MongoDB. ID:", newResume._id);
 
     fs.unlinkSync(req.file.path);
+    console.log("🗑️  Temp file cleaned up");
 
-    res.json({ message: "Resume processed", resumeId: newResume._id });
+    // ── ATS CHECK: Call Python service with Dummy JD ──
+    let atsResult = null;
+    try {
+      console.log("\n── ATS CHECK ──");
+      console.log("🔄 Calling Python ATS service at", ATS_SERVICE_URL);
+      console.log("📋 Using Dummy JD (", DUMMY_JD.length, "chars)");
+
+      const atsResponse = await fetch(ATS_SERVICE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jd: DUMMY_JD,
+          resume: extractedText,
+        }),
+      });
+
+      atsResult = await atsResponse.json();
+
+      console.log("\n✅ ATS RESULTS RECEIVED:");
+      console.log("   🎯 ATS Score       :", atsResult.ats_score, "%");
+      if (atsResult.breakdown) {
+        console.log(
+          "   📊 Experience Match :",
+          atsResult.breakdown.experience,
+          "%",
+        );
+        console.log(
+          "   📊 Skills Match     :",
+          atsResult.breakdown.skills,
+          "%",
+        );
+        console.log(
+          "   📊 Education Match  :",
+          atsResult.breakdown.education,
+          "%",
+        );
+        console.log("   🏆 Bonus Points     :", atsResult.breakdown.bonus);
+      }
+      if (atsResult.keywords) {
+        console.log(
+          "   ✅ Matched Keywords :",
+          atsResult.keywords.matched?.join(", "),
+        );
+        console.log(
+          "   ❌ Missing Keywords  :",
+          atsResult.keywords.missing?.slice(0, 10).join(", "),
+        );
+      }
+    } catch (atsError) {
+      console.warn("\n⚠️  ATS SERVICE UNAVAILABLE:", atsError.message);
+      console.warn("   Make sure python-server is running on port 8000");
+      console.warn("   Continuing without ATS score...");
+    }
+
+    console.log("\n" + "=".repeat(60));
+    console.log("📤 UPLOAD RESPONSE SENT");
+    console.log("=".repeat(60) + "\n");
+
+    res.json({
+      message: "Resume processed",
+      resumeId: newResume._id,
+      atsResult: atsResult,
+    });
   } catch (error) {
-    console.error("Upload Error:", error);
+    console.error("❌ Upload Error:", error);
     res.status(500).json({ error: "Failed to process resume" });
   }
 });

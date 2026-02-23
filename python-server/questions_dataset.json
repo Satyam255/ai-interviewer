@@ -1,0 +1,23 @@
+[
+  {
+    "id": "q1",
+    "topic": "React",
+    "difficulty": "Intermediate",
+    "question": "Can you explain the difference between useMemo and useCallback, and when you would choose to use one over the other?",
+    "ideal_keywords": ["memoization", "re-rendering", "functions", "values", "performance"]
+  },
+  {
+    "id": "q2",
+    "topic": "System Design",
+    "difficulty": "Advanced",
+    "question": "How would you design a rate limiter for a high-traffic API? Which database would you use to store the counts?",
+    "ideal_keywords": ["redis", "token bucket", "sliding window", "latency", "memory"]
+  },
+  {
+    "id": "q3",
+    "topic": "MongoDB",
+    "difficulty": "Intermediate",
+    "question": "Explain how the aggregation pipeline works in MongoDB. What is the advantage of using it over multiple standard queries?",
+    "ideal_keywords": ["stages", "$match", "$group", "performance", "server-side"]
+  }
+]

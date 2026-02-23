@@ -10,6 +10,7 @@ function App() {
   const [questionLimit, setQuestionLimit] = useState(5);
   const [loading, setLoading] = useState(false);
   const [interviewActive, setInterviewActive] = useState(false);
+  const [atsResult, setAtsResult] = useState(null);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -18,25 +19,55 @@ function App() {
     formData.append("resume", file);
     try {
       setLoading(true);
+      setAtsResult(null);
+      console.log("📤 Uploading resume:", file.name);
+
       const res = await axios.post(`${SERVER_URL}/upload`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
+      console.log("📥 Upload response:", res.data);
       setResumeId(res.data.resumeId);
-      setInterviewActive(true);
+
+      // Store ATS result if available
+      if (res.data.atsResult) {
+        console.log("🎯 ATS Score:", res.data.atsResult.ats_score, "%");
+        console.log("📊 Breakdown:", res.data.atsResult.breakdown);
+        console.log("🔑 Keywords:", res.data.atsResult.keywords);
+        setAtsResult(res.data.atsResult);
+      } else {
+        console.warn(
+          "⚠️ No ATS result returned (Python service may be offline)",
+        );
+      }
+
       setLoading(false);
     } catch (error) {
-      console.error("Upload failed", error);
+      console.error("❌ Upload failed", error);
       setLoading(false);
     }
+  };
+
+  const handleStartInterview = () => {
+    console.log("🎙️ Starting interview with resumeId:", resumeId);
+    setInterviewActive(true);
   };
 
   const handleEnd = () => {
     setInterviewActive(false);
     setResumeId(null);
+    setAtsResult(null);
   };
 
   const handleComplete = (feedback) => {
-    console.log("Interview completed with feedback:", feedback);
+    console.log("✅ Interview completed with feedback:", feedback);
+  };
+
+  // ── Score color helper ──
+  const getScoreColor = (score) => {
+    if (score >= 70) return "#22c55e";
+    if (score >= 50) return "#eab308";
+    return "#ef4444";
   };
 
   // ── Interview active → render the component full-screen ──
@@ -131,34 +162,143 @@ function App() {
           voice interaction and instant feedback.
         </div>
 
-        <div
-          className="upload-card"
-          onClick={() => document.getElementById("fileInput").click()}
-        >
-          <div className="upload-icon">📄</div>
-          <label htmlFor="fileInput">Click to upload your resume (PDF)</label>
-          <input
-            id="fileInput"
-            type="file"
-            accept=".pdf"
-            onChange={handleFileUpload}
-          />
-        </div>
+        {/* ── ATS Results Card ── */}
+        {atsResult && (
+          <div className="ats-results-card">
+            <div className="ats-header">
+              <span className="ats-badge">📊 ATS Score Report</span>
+              <span
+                className="ats-score-big"
+                style={{ color: getScoreColor(atsResult.ats_score) }}
+              >
+                {atsResult.ats_score}%
+              </span>
+            </div>
 
-        <div className="upload-options">
-          <label>Interview Length:</label>
-          <select
-            value={questionLimit}
-            onChange={(e) => setQuestionLimit(Number(e.target.value))}
-          >
-            <option value={3}>Short (3 Questions)</option>
-            <option value={5}>Standard (5 Questions)</option>
-            <option value={8}>Extended (8 Questions)</option>
-          </select>
-        </div>
+            <div className="ats-breakdown">
+              <div className="ats-bar-group">
+                <div className="ats-bar-label">
+                  <span>Experience</span>
+                  <span>{atsResult.breakdown?.experience}%</span>
+                </div>
+                <div className="ats-bar-track">
+                  <div
+                    className="ats-bar-fill"
+                    style={{
+                      width: `${atsResult.breakdown?.experience}%`,
+                      background: getScoreColor(
+                        atsResult.breakdown?.experience,
+                      ),
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="ats-bar-group">
+                <div className="ats-bar-label">
+                  <span>Skills</span>
+                  <span>{atsResult.breakdown?.skills}%</span>
+                </div>
+                <div className="ats-bar-track">
+                  <div
+                    className="ats-bar-fill"
+                    style={{
+                      width: `${atsResult.breakdown?.skills}%`,
+                      background: getScoreColor(atsResult.breakdown?.skills),
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="ats-bar-group">
+                <div className="ats-bar-label">
+                  <span>Education</span>
+                  <span>{atsResult.breakdown?.education}%</span>
+                </div>
+                <div className="ats-bar-track">
+                  <div
+                    className="ats-bar-fill"
+                    style={{
+                      width: `${atsResult.breakdown?.education}%`,
+                      background: getScoreColor(atsResult.breakdown?.education),
+                    }}
+                  />
+                </div>
+              </div>
+              {atsResult.breakdown?.bonus > 0 && (
+                <div className="ats-bonus">
+                  🏆 Bonus Points: +{atsResult.breakdown.bonus}
+                </div>
+              )}
+            </div>
+
+            {atsResult.keywords?.matched?.length > 0 && (
+              <div className="ats-keywords">
+                <div className="ats-kw-title">✅ Matched Keywords</div>
+                <div className="ats-kw-tags">
+                  {atsResult.keywords.matched.slice(0, 12).map((kw, i) => (
+                    <span key={i} className="ats-tag matched">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {atsResult.keywords?.missing?.length > 0 && (
+              <div className="ats-keywords">
+                <div className="ats-kw-title">❌ Missing Keywords</div>
+                <div className="ats-kw-tags">
+                  {atsResult.keywords.missing.slice(0, 10).map((kw, i) => (
+                    <span key={i} className="ats-tag missing">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button className="ats-start-btn" onClick={handleStartInterview}>
+              🎙️ Continue to Interview →
+            </button>
+          </div>
+        )}
+
+        {/* ── File Upload Card (hidden after ATS results shown) ── */}
+        {!atsResult && (
+          <>
+            <div
+              className="upload-card"
+              onClick={() => document.getElementById("fileInput").click()}
+            >
+              <div className="upload-icon">📄</div>
+              <label htmlFor="fileInput">
+                Click to upload your resume (PDF)
+              </label>
+              <input
+                id="fileInput"
+                type="file"
+                accept=".pdf"
+                onChange={handleFileUpload}
+              />
+            </div>
+
+            <div className="upload-options">
+              <label>Interview Length:</label>
+              <select
+                value={questionLimit}
+                onChange={(e) => setQuestionLimit(Number(e.target.value))}
+              >
+                <option value={3}>Short (3 Questions)</option>
+                <option value={5}>Standard (5 Questions)</option>
+                <option value={8}>Extended (8 Questions)</option>
+              </select>
+            </div>
+          </>
+        )}
 
         {loading && (
-          <div className="upload-loading">⏳ Processing your resume...</div>
+          <div className="upload-loading">
+            ⏳ Processing resume & running ATS check...
+          </div>
         )}
       </div>
     </div>
